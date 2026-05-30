@@ -532,11 +532,11 @@ def pagina_stock():
                     conn_chk = get_connection()
                     _c1 = conn_chk.cursor()
                     _c1.execute("""
-                        SELECT CAST(SPLIT_PART(REPLACE(observacoes,'ANULADO:',''),' ',1) AS INTEGER)
+                        SELECT CAST(SPLIT_PART(REPLACE(observacoes,'ANULADO:',''),' ',1) AS INTEGER) as mid
                         FROM movimentos_stock
                         WHERE tipo='ajuste' AND observacoes LIKE 'ANULADO:%'
                     """)
-                    ja_anulados = set(row[0] for row in _c1.fetchall() if row[0])
+                    ja_anulados = set(row["mid"] for row in _c1.fetchall() if row["mid"])
                     release_connection(conn_chk)
 
                     # Filtrar entradas ainda não anuladas
@@ -556,11 +556,11 @@ def pagina_stock():
                         conn_chk = get_connection()
                         _c2 = conn_chk.cursor()
                         _c2.execute("""
-                            SELECT COUNT(*) FROM movimentos_stock
+                            SELECT COUNT(*) as n FROM movimentos_stock
                             WHERE produto_id=%s AND armazem_id=%s AND tipo='saida'
                             AND data > %s
                         """, (mov_sel["produto_id"], mov_sel["armazem_id"], str(mov_sel["data"])))
-                        saidas_posteriores = _c2.fetchone()[0]
+                        saidas_posteriores = _c2.fetchone()["n"]
                         release_connection(conn_chk)
 
                         if saidas_posteriores > 0:
@@ -1373,10 +1373,10 @@ def pagina_produtos():
                     if apagar:
                         conn = get_connection()
                         _ca = conn.cursor()
-                        _ca.execute("SELECT COALESCE(SUM(quantidade),0) FROM stock WHERE produto_id=%s", (p["id"],))
-                        tem_stock = _ca.fetchone()[0] or 0
-                        _ca.execute("SELECT COUNT(*) FROM encomenda_linhas WHERE produto_id=%s", (p["id"],))
-                        tem_enc = _ca.fetchone()[0]
+                        _ca.execute("SELECT COALESCE(SUM(quantidade),0) as total FROM stock WHERE produto_id=%s", (p["id"],))
+                        tem_stock = _ca.fetchone()["total"] or 0
+                        _ca.execute("SELECT COUNT(*) as n FROM encomenda_linhas WHERE produto_id=%s", (p["id"],))
+                        tem_enc = _ca.fetchone()["n"]
                         if tem_stock > 0:
                             release_connection(conn)
                             st.error(f"❌ Não é possível apagar '{p['nome']}' — ainda tem {tem_stock} unidades em stock. Desative-o em vez de apagar.")
