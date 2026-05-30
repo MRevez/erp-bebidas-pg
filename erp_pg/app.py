@@ -29,6 +29,43 @@ from modules.vendas import (
     registar_pagamento_encomenda, estatisticas_vendas
 )
 
+# Cache de dados — evita consultas repetidas à BD em cada interacção
+@st.cache_data(ttl=30)
+def _cached_armazens():
+    return listar_armazens()
+
+@st.cache_data(ttl=30)
+def _cached_produtos():
+    return listar_produtos()
+
+@st.cache_data(ttl=15)
+def _cached_clientes(incluir_bloqueados=True):
+    return listar_clientes(incluir_bloqueados)
+
+@st.cache_data(ttl=15)
+def _cached_stock(armazem_id=None):
+    return stock_armazem(armazem_id)
+
+@st.cache_data(ttl=15)
+def _cached_encomendas(armazem_id=None, estado=None, limite=50):
+    return listar_encomendas(armazem_id, estado, limite)
+
+@st.cache_data(ttl=15)
+def _cached_stats_clientes():
+    return estatisticas_clientes()
+
+@st.cache_data(ttl=15)
+def _cached_stats_vendas(armazem_id=None):
+    return estatisticas_vendas(armazem_id)
+
+@st.cache_data(ttl=15)
+def _cached_alertas_stock():
+    return alertas_stock_minimo()
+
+@st.cache_data(ttl=15)
+def _cached_alertas_validade(dias=60):
+    return alertas_validade(dias)
+
 # ── Configuração ───────────────────────────────────────────────────────────────
 st.set_page_config(page_title="ERP Bebidas", page_icon="🍺", layout="wide",
                    initial_sidebar_state="expanded")
@@ -189,10 +226,10 @@ def pagina_dashboard():
     # Admin vê tudo; encarregado e condutor veem só o seu armazém
     armazem_id = None if u["perfil"] == "admin" else u["armazem_id"]
 
-    stats_cl = estatisticas_clientes()
-    stats_v  = estatisticas_vendas(armazem_id)
-    alertas  = alertas_stock_minimo()
-    venc     = alertas_validade(60)
+    stats_cl = _cached_stats_clientes()
+    stats_v  = _cached_stats_vendas(armazem_id)
+    alertas  = _cached_alertas_stock()
+    venc     = _cached_alertas_validade(60)
 
     # Filtrar alertas pelo armazém do utilizador (se não for admin)
     if armazem_id:
@@ -243,7 +280,7 @@ def pagina_dashboard():
 
     # Últimas encomendas — visíveis para TODOS os perfis
     st.markdown("### 🛒 Últimas Encomendas")
-    encs = listar_encomendas(armazem_id, limite=8)
+    encs = _cached_encomendas(armazem_id, limite=8)
     if encs:
         df = pd.DataFrame(encs)[["numero","cliente_nome","armazem_nome","estado","total","paga","data_encomenda"]]
         df.columns = ["Nº","Cliente","Armazém","Estado","Total (€)","Paga","Data"]
@@ -261,7 +298,7 @@ def pagina_dashboard():
 def pagina_stock():
     u = st.session_state.utilizador
     st.markdown("## 📦 Gestão de Stock")
-    armazens = listar_armazens()
+    armazens = _cached_armazens()
     tab1,tab2,tab3,tab4 = st.tabs(["📋 Stock atual","⬆️ Entrada","↔️ Transferência","📜 Histórico"])
 
     with tab1:
@@ -271,7 +308,7 @@ def pagina_stock():
         with c2:
             pesquisa_stock = st.text_input("🔍 Pesquisar produto (nome, referência ou categoria)", "")
         arm_id = None if sel == "Todos os armazéns" else next(a["id"] for a in armazens if a["nome"] == sel)
-        dados = stock_armazem(arm_id)
+        dados = _cached_stock(arm_id)
         if pesquisa_stock:
             termo = pesquisa_stock.lower()
             dados = [d for d in dados if
@@ -349,7 +386,7 @@ def pagina_stock():
         if not tem_permissao(u["perfil"],"stock","entrada"):
             st.warning("⚠️ Sem permissão para registar entradas.")
         else:
-            produtos = listar_produtos()
+            produtos = _cached_produtos()
 
             # Estado da confirmação pendente
             if "entrada_pendente" not in st.session_state:
@@ -382,7 +419,9 @@ def pagina_stock():
                                   + (f" Validade: {ep['val_str']}." if ep['val_str'] else " Sem data de validade."),
                                   res.get("erro"))
                         st.session_state.entrada_pendente = None
-                        if res["ok"]: st.rerun()
+                        if res["ok"]:
+                            st.cache_data.clear()
+                            st.rerun()
                 with col_cancel:
                     if st.button("❌ Cancelar e corrigir", use_container_width=True):
                         st.session_state.entrada_pendente = None
@@ -438,7 +477,7 @@ def pagina_stock():
         if not tem_permissao(u["perfil"],"stock","transferencia"):
             st.warning("⚠️ Sem permissão para transferências.")
         else:
-            produtos = listar_produtos()
+            produtos = _cached_produtos()
             with st.form("transf_stock"):
                 st.markdown("#### Transferência entre armazéns")
                 c1,c2 = st.columns(2)
@@ -612,7 +651,7 @@ def pagina_clientes():
         c1,c2 = st.columns([3,1])
         with c1: pesquisa = st.text_input("🔍 Pesquisar (nome ou NIF)", "")
         with c2: mostrar_bloq = st.checkbox("Mostrar bloqueados", value=True)
-        clientes = listar_clientes(mostrar_bloq)
+        clientes = _cached_clientes(mostrar_bloq)
         if pesquisa:
             clientes = [c for c in clientes if pesquisa.lower() in c["nome"].lower()
                         or (c["nif"] and pesquisa in c["nif"])]
@@ -673,11 +712,13 @@ def pagina_clientes():
                         res = criar_cliente({"nome":nome,"nif":nif,"telefone":tel,
                                              "email":email,"morada":morada,"limite_credito":limite})
                         notificar(res["ok"], f"Cliente '{nome}' criado com sucesso!", res.get("erro"))
-                        if res["ok"]: st.rerun()
+                        if res["ok"]:
+                            st.cache_data.clear()
+                            st.rerun()
 
     with tab3:
         st.markdown("#### Registar avaliação / ocorrência")
-        clientes_todos = listar_clientes(True)
+        clientes_todos = _cached_clientes(True)
         cl_nomes = [f"{c['nome']} (NIF: {c['nif'] or 'N/D'})" for c in clientes_todos]
         sel  = st.selectbox("Selecionar cliente", cl_nomes)
         idx  = cl_nomes.index(sel)
@@ -762,13 +803,13 @@ def pagina_encomendas():
     tab1,tab2 = st.tabs(["📋 Lista de encomendas","➕ Nova encomenda"])
 
     with tab1:
-        armazens = listar_armazens()
+        armazens = _cached_armazens()
         c1,c2 = st.columns(2)
         with c1: arm_fil    = st.selectbox("Armazém", ["Todos"] + [a["nome"] for a in armazens])
         with c2: estado_fil = st.selectbox("Estado", ["Todos","pendente","confirmada","expedida","entregue","cancelada","bloqueada"])
         arm_id_fil  = None if arm_fil == "Todos" else next(a["id"] for a in armazens if a["nome"] == arm_fil)
         estado_fil2 = None if estado_fil == "Todos" else estado_fil
-        encs = listar_encomendas(arm_id_fil, estado_fil2)
+        encs = _cached_encomendas(arm_id_fil, estado_fil2)
 
         if not encs:
             st.info("Sem encomendas encontradas.")
@@ -797,7 +838,9 @@ def pagina_encomendas():
                                           f"Encomenda {enc['numero']} atualizada para '{novo_est}' com sucesso."
                                           + (" O stock foi descontado automaticamente." if novo_est == "expedida" else ""),
                                           res.get("erro"))
-                                if res["ok"]: st.rerun()
+                                if res["ok"]:
+                                    st.cache_data.clear()
+                                    st.rerun()
 
                     if not enc["paga"] and enc["estado"] == "entregue" and tem_permissao(u["perfil"],"vendas","pagar"):
                         st.markdown("---")
@@ -808,16 +851,18 @@ def pagina_encomendas():
                             notificar(res["ok"],
                                       f"Pagamento da encomenda {enc['numero']} registado com sucesso.",
                                       res.get("erro"))
-                            if res["ok"]: st.rerun()
+                            if res["ok"]:
+                                st.cache_data.clear()
+                                st.rerun()
 
     with tab2:
         if not tem_permissao(u["perfil"],"vendas","criar"):
             st.warning("⚠️ Sem permissão para criar encomendas.")
             return
 
-        clientes = listar_clientes(incluir_bloqueados=False)
-        armazens = listar_armazens()
-        produtos = listar_produtos()
+        clientes = _cached_clientes(incluir_bloqueados=False)
+        armazens = _cached_armazens()
+        produtos = _cached_produtos()
 
         c1,c2 = st.columns(2)
         with c1:
@@ -876,14 +921,16 @@ def pagina_encomendas():
         from datetime import date as _date
         if prod_obj:
             conn_lotes = get_connection()
-            lotes_disp = conn_lotes.execute("""
+            _cl = conn_lotes.cursor()
+            _cl.execute("""
                 SELECT lote, quantidade, validade
                 FROM stock
                 WHERE produto_id=%s AND armazem_id=%s AND quantidade>0
                 ORDER BY
                     CASE WHEN validade IS NULL OR validade='' THEN 1 ELSE 0 END,
                     validade ASC
-            """, (prod_obj["id"], arm_sel["id"])).fetchall()
+            """, (prod_obj["id"], arm_sel["id"]))
+            lotes_disp = _cl.fetchall()
             release_connection(conn_lotes)
 
             if lotes_disp:
@@ -956,7 +1003,7 @@ def pagina_relatorios():
         "📜 Movimentos de armazém"
     ])
 
-    armazens = listar_armazens()
+    armazens = _cached_armazens()
 
     with tab1:
         # Filtro por armazém
@@ -1357,7 +1404,7 @@ def pagina_admin():
         st.dataframe(df, use_container_width=True, hide_index=True)
 
         st.markdown("#### Criar novo utilizador")
-        armazens = listar_armazens()
+        armazens = _cached_armazens()
         with st.form("novo_user"):
             c1,c2 = st.columns(2)
             with c1:
@@ -1372,11 +1419,13 @@ def pagina_admin():
                 res = criar_utilizador({"nome":nome_u,"username":username_u,"password":password_u,
                                         "perfil":perfil_u,"armazem_id":arm_id_u})
                 notificar(res["ok"], f"Utilizador '{nome_u}' criado com sucesso!", res.get("erro"))
-                if res["ok"]: st.rerun()
+                if res["ok"]:
+                            st.cache_data.clear()
+                            st.rerun()
 
     with tab2:
         st.markdown("#### Editar colaborador")
-        armazens = listar_armazens()
+        armazens = _cached_armazens()
         users    = listar_utilizadores()
         if not users:
             st.info("Sem utilizadores disponíveis.")
