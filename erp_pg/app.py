@@ -528,15 +528,15 @@ def pagina_stock():
 
                 entradas = [m for m in movs if m["tipo"] == "entrada"]
                 if entradas:
-                    # Obter IDs já anulados (entradas que já têm um ajuste de anulação)
+                    # Obter IDs já anulados
                     conn_chk = get_connection()
-                    ja_anulados = set(
-                        row[0] for row in conn_chk.execute("""
-                            SELECT CAST(REPLACE(REPLACE(observacoes,'ANULADO:',''),' ','') AS INTEGER)
-                            FROM movimentos_stock
-                            WHERE tipo='ajuste' AND observacoes LIKE 'ANULADO:%'
-                        """).fetchall() if row[0]
-                    )
+                    _c1 = conn_chk.cursor()
+                    _c1.execute("""
+                        SELECT CAST(SPLIT_PART(REPLACE(observacoes,'ANULADO:',''),' ',1) AS INTEGER)
+                        FROM movimentos_stock
+                        WHERE tipo='ajuste' AND observacoes LIKE 'ANULADO:%'
+                    """)
+                    ja_anulados = set(row[0] for row in _c1.fetchall() if row[0])
                     release_connection(conn_chk)
 
                     # Filtrar entradas ainda não anuladas
@@ -554,11 +554,13 @@ def pagina_stock():
 
                         # Verificar se já houve saída deste produto/armazém após esta entrada
                         conn_chk = get_connection()
-                        saidas_posteriores = conn_chk.execute("""
+                        _c2 = conn_chk.cursor()
+                        _c2.execute("""
                             SELECT COUNT(*) FROM movimentos_stock
                             WHERE produto_id=%s AND armazem_id=%s AND tipo='saida'
                             AND data > %s
-                        """, (mov_sel["produto_id"], mov_sel["armazem_id"], str(mov_sel["data"]))).fetchone()[0]
+                        """, (mov_sel["produto_id"], mov_sel["armazem_id"], str(mov_sel["data"])))
+                        saidas_posteriores = _c2.fetchone()[0]
                         release_connection(conn_chk)
 
                         if saidas_posteriores > 0:
@@ -601,12 +603,14 @@ def pagina_stock():
                                             """, (mov_sel["quantidade"], mov_sel["produto_id"],
                                                   mov_sel["armazem_id"], lote_entrada))
                                         else:
-                                            # Sem lote identificável — descontar do lote com mais stock (mais seguro)
-                                            lote_row = conn_an.execute("""
+                                            # Sem lote identificável — descontar do lote com mais stock
+                                            _c_find = conn_an.cursor()
+                                            _c_find.execute("""
                                                 SELECT id FROM stock
                                                 WHERE produto_id=%s AND armazem_id=%s
                                                 ORDER BY quantidade DESC LIMIT 1
-                                            """, (mov_sel["produto_id"], mov_sel["armazem_id"])).fetchone()
+                                            """, (mov_sel["produto_id"], mov_sel["armazem_id"]))
+                                            lote_row = _c_find.fetchone()
                                             if lote_row:
                                                 _cur_an = conn_an.cursor()
                                                 _cur_an.execute("""
@@ -1368,23 +1372,22 @@ def pagina_produtos():
 
                     if apagar:
                         conn = get_connection()
-                        # Verifica se tem stock ou encomendas associadas
-                        tem_stock = conn.execute(
-                            "SELECT SUM(quantidade) FROM stock WHERE produto_id=%s", (p["id"],)
-                        ).fetchone()[0] or 0
-                        tem_enc = conn.execute(
-                            "SELECT COUNT(*) FROM encomenda_linhas WHERE produto_id=%s", (p["id"],)
-                        ).fetchone()[0]
+                        _ca = conn.cursor()
+                        _ca.execute("SELECT COALESCE(SUM(quantidade),0) FROM stock WHERE produto_id=%s", (p["id"],))
+                        tem_stock = _ca.fetchone()[0] or 0
+                        _ca.execute("SELECT COUNT(*) FROM encomenda_linhas WHERE produto_id=%s", (p["id"],))
+                        tem_enc = _ca.fetchone()[0]
                         if tem_stock > 0:
-                            conn.close()
+                            release_connection(conn)
                             st.error(f"❌ Não é possível apagar '{p['nome']}' — ainda tem {tem_stock} unidades em stock. Desative-o em vez de apagar.")
                         elif tem_enc > 0:
-                            conn.close()
+                            release_connection(conn)
                             st.error(f"❌ Não é possível apagar '{p['nome']}' — está associado a {tem_enc} linha(s) de encomenda. Desative-o em vez de apagar.")
                         else:
-                            _cur = conn.cursor()
-                            _cur.execute("DELETE FROM produtos WHERE id=%s", (p["id"],))
-                            conn.commit(); conn.close()
+                            _ca.execute("DELETE FROM produtos WHERE id=%s", (p["id"],))
+                            conn.commit()
+                            release_connection(conn)
+                            st.cache_data.clear()
                             st.success(f"✅ Produto '{p['nome']}' apagado com sucesso.")
                             st.rerun()
 
