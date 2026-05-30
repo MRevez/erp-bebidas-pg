@@ -3,42 +3,28 @@ ERP Bebidas - Base de dados PostgreSQL (Supabase)
 """
 import psycopg2
 import psycopg2.extras
-import psycopg2.pool
 import hashlib
 import streamlit as st
 
 
-@st.cache_resource
-def _get_pool():
-    """Pool de ligações persistente — criado uma vez e reutilizado em todos os pedidos."""
-    return psycopg2.pool.ThreadedConnectionPool(
-        minconn=2,
-        maxconn=20,
-        dsn=st.secrets["DATABASE_URL"],
-        cursor_factory=psycopg2.extras.RealDictCursor
+def get_connection():
+    """Cria uma ligação directa ao Supabase."""
+    return psycopg2.connect(
+        st.secrets["DATABASE_URL"],
+        cursor_factory=psycopg2.extras.RealDictCursor,
+        connect_timeout=10
     )
 
 
-def get_connection():
-    """Devolve uma ligação do pool. Deve ser libertada com release_connection() após uso."""
-    pool = _get_pool()
-    conn = pool.getconn()
-    try:
-        conn.cursor().execute("SELECT 1")
-    except Exception:
-        pool.putconn(conn, close=True)
-        conn = pool.getconn()
-    return conn
-
-
 def release_connection(conn):
-    """Devolve a ligação ao pool. Faz rollback se houver transacção pendente."""
+    """Fecha a ligação. Faz rollback se houver transacção pendente."""
     try:
         if conn and not conn.closed:
-            if conn.status != psycopg2.extensions.STATUS_READY:
+            try:
                 conn.rollback()
-        pool = _get_pool()
-        pool.putconn(conn)
+            except Exception:
+                pass
+            conn.close()
     except Exception:
         pass
 
