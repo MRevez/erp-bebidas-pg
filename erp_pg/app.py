@@ -789,11 +789,11 @@ def pagina_clientes():
                                          (cl_sel["id"],
                                           f"Score definido manualmente pelo admin: {desc or 'sem motivo'}",
                                           score_antes, novo_score_manual, u["id"]))
-                            conn.commit(); conn.close()
+                            conn.commit(); release_connection(conn)
                             st.success(f"✅ Score de '{cl_sel['nome']}' atualizado de {score_antes} para {novo_score_manual}/100.")
                             st.rerun()
                         except Exception as e:
-                            conn.close(); st.error(f"❌ {e}")
+                            release_connection(conn); st.error(f"❌ {e}")
         else:
             st.warning("⚠️ Sem permissão para registar avaliações.")
 
@@ -1037,7 +1037,7 @@ def pagina_relatorios():
                 GROUP BY p.id ORDER BY p.categoria, p.nome
             """)
         rows = _cr.fetchall()
-        conn.close()
+        release_connection(conn)
 
         df = pd.DataFrame([dict(r) for r in rows])
         if not df.empty:
@@ -1105,7 +1105,7 @@ def pagina_relatorios():
             ORDER BY e.data_encomenda DESC
         """, params)
         rows = _c.fetchall()
-        conn.close()
+        release_connection(conn)
 
         if rows:
             df = pd.DataFrame([dict(r) for r in rows])
@@ -1175,7 +1175,7 @@ def pagina_relatorios():
             ORDER BY m.data DESC
         """, params_m)
         rows_m = _cm.fetchall()
-        conn.close()
+        release_connection(conn)
 
         if rows_m:
             df_m = pd.DataFrame([dict(r) for r in rows_m])
@@ -1214,7 +1214,7 @@ def pagina_produtos():
         _cp = conn.cursor()
         _cp.execute(sql)
         produtos = [dict(r) for r in _cp.fetchall()]
-        conn.close()
+        release_connection(conn)
 
         if pesquisa:
             produtos = [p for p in produtos if pesquisa.lower() in p["nome"].lower()
@@ -1251,7 +1251,7 @@ def pagina_produtos():
                                     _cur = conn.cursor()
                                     _cur.execute("UPDATE produtos SET ativo=%s WHERE id=%s",
                                                  (0 if p["ativo"] else 1, p["id"]))
-                                    conn.commit(); conn.close()
+                                    conn.commit(); release_connection(conn)
                                     st.success(f"✅ Produto '{p['nome']}' {'desativado' if p['ativo'] else 'ativado'} com sucesso.")
                                     st.rerun()
 
@@ -1292,10 +1292,10 @@ def pagina_produtos():
                                             preco_venda,preco_compra,stock_minimo)
                                             VALUES (%s,%s,%s,%s,%s,%s,%s)""",
                                          (ref,nome,categoria,unidade,preco_venda,preco_compra,stock_min))
-                            conn.commit(); conn.close()
+                            conn.commit(); release_connection(conn)
                             st.success(f"✅ Produto '{nome}' (ref: {ref}) criado com sucesso!")
                         except Exception as e:
-                            conn.close()
+                            release_connection(conn)
                             st.error("❌ Já existe um produto com essa referência." if "UNIQUE" in str(e) else f"❌ {e}")
 
     with tab3:
@@ -1306,7 +1306,7 @@ def pagina_produtos():
             _cpt = conn.cursor()
             _cpt.execute("SELECT * FROM produtos ORDER BY categoria, nome")
             produtos_todos = [dict(r) for r in _cpt.fetchall()]
-            conn.close()
+            release_connection(conn)
 
             if not produtos_todos:
                 st.info("Sem produtos disponíveis.")
@@ -1363,11 +1363,11 @@ def pagina_produtos():
                                                WHERE id=%s""",
                                              (ref_e,nome_e,categoria_e,unidade_e,
                                               preco_v_e,preco_c_e,stock_m_e,p["id"]))
-                                conn.commit(); conn.close()
+                                conn.commit(); release_connection(conn)
                                 st.success(f"✅ Produto '{nome_e}' atualizado com sucesso!")
                                 st.rerun()
                             except Exception as e:
-                                conn.close()
+                                release_connection(conn)
                                 st.error("❌ Já existe outro produto com essa referência." if "UNIQUE" in str(e) else f"❌ {e}")
 
                     if apagar:
@@ -1470,20 +1470,20 @@ def pagina_admin():
                                 _cur = conn.cursor()
                                 _cur.execute("UPDATE utilizadores SET password_hash=%s WHERE id=%s",
                                              (hash_password(nova_pass),u_sel["id"]))
-                            conn.commit(); conn.close()
+                            conn.commit(); release_connection(conn)
                             msg = f"Colaborador '{nome_e}' atualizado com sucesso."
                             if nova_pass: msg += " Password alterada."
                             st.success(f"✅ {msg}")
                             st.rerun()
                         except Exception as e:
-                            conn.close(); st.error(f"❌ {e}")
+                            release_connection(conn); st.error(f"❌ {e}")
 
     with tab3:
         conn = get_connection()
         _cmod = conn.cursor()
         _cmod.execute("SELECT * FROM modulos ORDER BY nome")
         modulos = _cmod.fetchall()
-        conn.close()
+        release_connection(conn)
         st.markdown("#### Módulos instalados")
         for m in modulos:
             st.markdown(f"✅ **{m['nome'].capitalize()}** v{m['versao']} — instalado em {str(m['instalado_em'])[:10]}")
@@ -1497,10 +1497,10 @@ def pagina_admin():
                 try:
                     _cur = conn.cursor()
                     _cur.execute("INSERT INTO modulos (nome) VALUES (%s)", (novo_modulo,))
-                    conn.commit(); conn.close()
+                    conn.commit(); release_connection(conn)
                     st.success(f"✅ Módulo '{novo_modulo}' registado com sucesso!")
                 except Exception as e:
-                    conn.close(); st.error(str(e))
+                    release_connection(conn); st.error(str(e))
 
 
 # ══════════════════════════════════════════════════════════════════════════════

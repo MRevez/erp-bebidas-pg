@@ -12,22 +12,31 @@ import streamlit as st
 def _get_pool():
     """Pool de ligações persistente — criado uma vez e reutilizado em todos os pedidos."""
     return psycopg2.pool.ThreadedConnectionPool(
-        minconn=1,
-        maxconn=10,
+        minconn=2,
+        maxconn=20,
         dsn=st.secrets["DATABASE_URL"],
         cursor_factory=psycopg2.extras.RealDictCursor
     )
 
 
 def get_connection():
-    """Devolve uma ligação do pool. Deve ser fechada com release_connection(conn) após uso."""
+    """Devolve uma ligação do pool. Deve ser libertada com release_connection() após uso."""
     pool = _get_pool()
-    return pool.getconn()
+    conn = pool.getconn()
+    try:
+        conn.cursor().execute("SELECT 1")
+    except Exception:
+        pool.putconn(conn, close=True)
+        conn = pool.getconn()
+    return conn
 
 
 def release_connection(conn):
-    """Devolve a ligação ao pool em vez de a fechar definitivamente."""
+    """Devolve a ligação ao pool. Faz rollback se houver transacção pendente."""
     try:
+        if conn and not conn.closed:
+            if conn.status != psycopg2.extensions.STATUS_READY:
+                conn.rollback()
         pool = _get_pool()
         pool.putconn(conn)
     except Exception:
