@@ -13,7 +13,7 @@ from datetime import datetime, timezone, timedelta
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from core.database import init_database, get_connection
+from core.database import init_database, get_connection, release_connection
 from core.auth import login, tem_permissao, listar_utilizadores, listar_armazens, listar_produtos, criar_utilizador
 from modules.clientes import (
     listar_clientes, obter_cliente, criar_cliente, atualizar_cliente,
@@ -498,7 +498,7 @@ def pagina_stock():
                             WHERE tipo='ajuste' AND observacoes LIKE 'ANULADO:%'
                         """).fetchall() if row[0]
                     )
-                    conn_chk.close()
+                    release_connection(conn_chk)
 
                     # Filtrar entradas ainda não anuladas
                     entradas_anulaveis = [m for m in entradas if m["id"] not in ja_anulados]
@@ -520,7 +520,7 @@ def pagina_stock():
                             WHERE produto_id=%s AND armazem_id=%s AND tipo='saida'
                             AND data > %s
                         """, (mov_sel["produto_id"], mov_sel["armazem_id"], str(mov_sel["data"]))).fetchone()[0]
-                        conn_chk.close()
+                        release_connection(conn_chk)
 
                         if saidas_posteriores > 0:
                             st.markdown("<div class='alerta-box'>⚠️ Não é possível anular esta entrada — já existem saídas posteriores. Faz um ajuste manual de stock em vez disso.</div>",
@@ -587,12 +587,12 @@ def pagina_stock():
                                               f"ANULADO:{mov_sel['id']} | Lote: {lote_entrada or 'N/D'} | Motivo: {motivo_anul}",
                                               u["id"]))
                                         conn_an.commit()
-                                        conn_an.close()
+                                        release_connection(conn_an)
                                         st.success(f"✅ Entrada anulada com sucesso. Stock do lote '{lote_entrada or 'N/D'}' corrigido em -{mov_sel['quantidade']} unidade(s).")
                                         st.rerun()
                                     except Exception as e:
                                         conn_an.rollback()
-                                        conn_an.close()
+                                        release_connection(conn_an)
                                         st.error(f"❌ {e}")
                 else:
                     st.info("Sem entradas disponíveis para anular.")
@@ -884,7 +884,7 @@ def pagina_encomendas():
                     CASE WHEN validade IS NULL OR validade='' THEN 1 ELSE 0 END,
                     validade ASC
             """, (prod_obj["id"], arm_sel["id"])).fetchall()
-            conn_lotes.close()
+            release_connection(conn_lotes)
 
             if lotes_disp:
                 lotes_info = "  |  ".join([

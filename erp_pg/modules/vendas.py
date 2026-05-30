@@ -1,7 +1,7 @@
 """
 ERP Bebidas - Módulo de Vendas (PostgreSQL)
 """
-from core.database import get_connection
+from core.database import get_connection, release_connection
 from modules.clientes import verificar_bloqueio
 import datetime
 
@@ -34,7 +34,7 @@ def listar_encomendas(armazem_id=None, estado=None, limite=50):
               {'WHERE '+' AND '.join(where) if where else ''}
               ORDER BY e.data_encomenda DESC LIMIT %s"""
     params.append(limite)
-    rows = _q(conn, sql, params); conn.close()
+    rows = _q(conn, sql, params); release_connection(conn)
     return [dict(r) for r in rows]
 
 
@@ -58,10 +58,10 @@ def criar_encomenda(cliente_id, armazem_id, linhas, utilizador_id, condutor_id=N
                          VALUES (%s,%s,%s,%s,%s)""",
                       (enc_id,l["produto_id"],l["quantidade"],l["preco_unitario"],
                        l["quantidade"]*l["preco_unitario"]))
-        conn.commit(); conn.close()
+        conn.commit(); release_connection(conn)
         return {"ok": True, "encomenda_id": enc_id, "numero": numero, "total": total}
     except Exception as e:
-        conn.close(); return {"ok": False, "erro": str(e)}
+        release_connection(conn); return {"ok": False, "erro": str(e)}
 
 
 def atualizar_estado(encomenda_id, novo_estado, utilizador_id):
@@ -72,7 +72,7 @@ def atualizar_estado(encomenda_id, novo_estado, utilizador_id):
     try:
         enc = _q1(conn, "SELECT * FROM encomendas WHERE id=%s", (encomenda_id,))
         if not enc:
-            conn.close(); return {"ok": False, "erro": "Encomenda não encontrada"}
+            release_connection(conn); return {"ok": False, "erro": "Encomenda não encontrada"}
 
         if novo_estado == "expedida" and enc["estado"] == "confirmada":
             linhas = _q(conn, "SELECT * FROM encomenda_linhas WHERE encomenda_id=%s", (encomenda_id,))
@@ -86,7 +86,7 @@ def atualizar_estado(encomenda_id, novo_estado, utilizador_id):
                     "SELECT COALESCE(SUM(quantidade),0) as q FROM stock WHERE produto_id=%s AND armazem_id=%s AND quantidade>0",
                     (produto_id, armazem_id))["q"]
                 if total_disp < quantidade:
-                    conn.rollback(); conn.close()
+                    conn.rollback(); release_connection(conn)
                     nome_prod = _q1(conn, "SELECT nome FROM produtos WHERE id=%s", (produto_id,))
                     return {"ok": False, "erro": f"Stock insuficiente para '{nome_prod['nome'] if nome_prod else produto_id}'."}
 
@@ -113,9 +113,9 @@ def atualizar_estado(encomenda_id, novo_estado, utilizador_id):
 
         c = conn.cursor()
         c.execute("UPDATE encomendas SET estado=%s WHERE id=%s", (novo_estado, encomenda_id))
-        conn.commit(); conn.close(); return {"ok": True}
+        conn.commit(); release_connection(conn); return {"ok": True}
     except Exception as e:
-        conn.rollback(); conn.close(); return {"ok": False, "erro": str(e)}
+        conn.rollback(); release_connection(conn); return {"ok": False, "erro": str(e)}
 
 
 def registar_pagamento_encomenda(encomenda_id, utilizador_id):
@@ -123,9 +123,9 @@ def registar_pagamento_encomenda(encomenda_id, utilizador_id):
     try:
         c = conn.cursor()
         c.execute("UPDATE encomendas SET paga=1,data_pagamento=NOW() WHERE id=%s", (encomenda_id,))
-        conn.commit(); conn.close(); return {"ok": True}
+        conn.commit(); release_connection(conn); return {"ok": True}
     except Exception as e:
-        conn.close(); return {"ok": False, "erro": str(e)}
+        release_connection(conn); return {"ok": False, "erro": str(e)}
 
 
 def estatisticas_vendas(armazem_id=None):
@@ -139,6 +139,6 @@ def estatisticas_vendas(armazem_id=None):
     pend = c.fetchone()["n"]
     c.execute(f"SELECT COUNT(*) as n FROM encomendas e {f} {'AND' if f else 'WHERE'} paga=0 AND estado NOT IN ('cancelada','bloqueada')", p)
     ppag = c.fetchone()["n"]
-    conn.close()
+    release_connection(conn)
     return {"total_encomendas": r["n"], "total_valor": round(r["v"],2),
             "pendentes": pend, "por_pagar": ppag}

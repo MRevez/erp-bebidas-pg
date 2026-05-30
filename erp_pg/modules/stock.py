@@ -1,7 +1,7 @@
 """
 ERP Bebidas - Módulo de Stock (PostgreSQL)
 """
-from core.database import get_connection
+from core.database import get_connection, release_connection
 
 
 def _q(conn, sql, params=None):
@@ -25,7 +25,7 @@ def stock_armazem(armazem_id=None):
                            FROM stock s JOIN produtos p ON s.produto_id=p.id
                            JOIN armazens a ON s.armazem_id=a.id
                            ORDER BY a.nome,p.categoria,p.nome""")
-    conn.close(); return [dict(r) for r in rows]
+    release_connection(conn); return [dict(r) for r in rows]
 
 
 def stock_consolidado():
@@ -34,7 +34,7 @@ def stock_consolidado():
                        p.stock_minimo,COALESCE(SUM(s.quantidade),0) as total
                        FROM produtos p LEFT JOIN stock s ON p.id=s.produto_id
                        WHERE p.ativo=1 GROUP BY p.id ORDER BY p.categoria,p.nome""")
-    conn.close(); return [dict(r) for r in rows]
+    release_connection(conn); return [dict(r) for r in rows]
 
 
 def alertas_stock_minimo():
@@ -47,7 +47,7 @@ def alertas_stock_minimo():
                        GROUP BY p.id,p.nome,p.referencia,p.stock_minimo,s.armazem_id,a.nome
                        HAVING SUM(s.quantidade) <= p.stock_minimo
                        ORDER BY (SUM(s.quantidade)-p.stock_minimo),p.nome""")
-    conn.close(); return [dict(r) for r in rows]
+    release_connection(conn); return [dict(r) for r in rows]
 
 
 def alertas_validade(dias=60):
@@ -60,7 +60,7 @@ def alertas_validade(dias=60):
                          AND s.quantidade>0
                          AND (DATE(s.validade)-CURRENT_DATE)<=%s
                        ORDER BY s.validade ASC""", (dias,))
-    conn.close(); return [dict(r) for r in rows]
+    release_connection(conn); return [dict(r) for r in rows]
 
 
 def registar_entrada(produto_id, armazem_id, quantidade, lote, validade, utilizador_id, ref_doc=None, obs=None):
@@ -77,9 +77,9 @@ def registar_entrada(produto_id, armazem_id, quantidade, lote, validade, utiliza
                      (produto_id,armazem_id,tipo,quantidade,referencia_doc,observacoes,utilizador_id)
                      VALUES (%s,%s,'entrada',%s,%s,%s,%s)""",
                   (produto_id,armazem_id,quantidade,ref_doc,obs_final,utilizador_id))
-        conn.commit(); conn.close(); return {"ok": True}
+        conn.commit(); release_connection(conn); return {"ok": True}
     except Exception as e:
-        conn.close(); return {"ok": False, "erro": str(e)}
+        release_connection(conn); return {"ok": False, "erro": str(e)}
 
 
 def registar_saida(produto_id, armazem_id, quantidade, utilizador_id, ref_doc=None, obs=None):
@@ -90,7 +90,7 @@ def registar_saida(produto_id, armazem_id, quantidade, utilizador_id, ref_doc=No
             "SELECT COALESCE(SUM(quantidade),0) as q FROM stock WHERE produto_id=%s AND armazem_id=%s AND quantidade>0",
             (produto_id, armazem_id))["q"]
         if total_disp < quantidade:
-            conn.close(); return {"ok": False, "erro": f"Stock insuficiente. Disponível: {total_disp}"}
+            release_connection(conn); return {"ok": False, "erro": f"Stock insuficiente. Disponível: {total_disp}"}
 
         lotes = _q(conn, """SELECT id,lote,quantidade FROM stock
                             WHERE produto_id=%s AND armazem_id=%s AND quantidade>0
@@ -113,10 +113,10 @@ def registar_saida(produto_id, armazem_id, quantidade, utilizador_id, ref_doc=No
                      (produto_id,armazem_id,tipo,quantidade,referencia_doc,observacoes,utilizador_id)
                      VALUES (%s,%s,'saida',%s,%s,%s,%s)""",
                   (produto_id,armazem_id,quantidade,ref_doc,obs_final,utilizador_id))
-        conn.commit(); conn.close()
+        conn.commit(); release_connection(conn)
         return {"ok": True, "stock_restante": total_disp-quantidade, "lotes": ", ".join(lotes_usados)}
     except Exception as e:
-        conn.close(); return {"ok": False, "erro": str(e)}
+        release_connection(conn); return {"ok": False, "erro": str(e)}
 
 
 def transferir_stock(produto_id, armazem_origem, armazem_destino, quantidade, utilizador_id, obs=None):
@@ -126,7 +126,7 @@ def transferir_stock(produto_id, armazem_origem, armazem_destino, quantidade, ut
             "SELECT COALESCE(SUM(quantidade),0) as q FROM stock WHERE produto_id=%s AND armazem_id=%s",
             (produto_id, armazem_origem))["q"]
         if atual < quantidade:
-            conn.close(); return {"ok": False, "erro": f"Stock insuficiente. Disponível: {atual}"}
+            release_connection(conn); return {"ok": False, "erro": f"Stock insuficiente. Disponível: {atual}"}
         lote_row = _q1(conn,
             "SELECT lote,validade FROM stock WHERE produto_id=%s AND armazem_id=%s AND quantidade>0 LIMIT 1",
             (produto_id, armazem_origem))
@@ -144,9 +144,9 @@ def transferir_stock(produto_id, armazem_origem, armazem_destino, quantidade, ut
                      (produto_id,armazem_id,tipo,quantidade,armazem_dest_id,observacoes,utilizador_id)
                      VALUES (%s,%s,'transferencia',%s,%s,%s,%s)""",
                   (produto_id,armazem_origem,quantidade,armazem_destino,obs,utilizador_id))
-        conn.commit(); conn.close(); return {"ok": True}
+        conn.commit(); release_connection(conn); return {"ok": True}
     except Exception as e:
-        conn.close(); return {"ok": False, "erro": str(e)}
+        release_connection(conn); return {"ok": False, "erro": str(e)}
 
 
 def historico_movimentos(armazem_id=None, produto_id=None, limite=60):
@@ -164,5 +164,5 @@ def historico_movimentos(armazem_id=None, produto_id=None, limite=60):
               {'WHERE '+' AND '.join(where) if where else ''}
               ORDER BY m.data DESC LIMIT %s"""
     params.append(limite)
-    rows = _q(conn, sql, params); conn.close()
+    rows = _q(conn, sql, params); release_connection(conn)
     return [dict(r) for r in rows]

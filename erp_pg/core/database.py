@@ -3,16 +3,35 @@ ERP Bebidas - Base de dados PostgreSQL (Supabase)
 """
 import psycopg2
 import psycopg2.extras
+import psycopg2.pool
 import hashlib
 import streamlit as st
 
 
-def get_connection():
-    conn = psycopg2.connect(
-        st.secrets["DATABASE_URL"],
+@st.cache_resource
+def _get_pool():
+    """Pool de ligações persistente — criado uma vez e reutilizado em todos os pedidos."""
+    return psycopg2.pool.ThreadedConnectionPool(
+        minconn=1,
+        maxconn=10,
+        dsn=st.secrets["DATABASE_URL"],
         cursor_factory=psycopg2.extras.RealDictCursor
     )
-    return conn
+
+
+def get_connection():
+    """Devolve uma ligação do pool. Deve ser fechada com release_connection(conn) após uso."""
+    pool = _get_pool()
+    return pool.getconn()
+
+
+def release_connection(conn):
+    """Devolve a ligação ao pool em vez de a fechar definitivamente."""
+    try:
+        pool = _get_pool()
+        pool.putconn(conn)
+    except Exception:
+        pass
 
 
 def hash_password(password: str) -> str:
@@ -100,7 +119,7 @@ def init_database():
 
     conn.commit()
     _seed(conn)
-    conn.close()
+    release_connection(conn)
 
 
 def _seed(conn):
